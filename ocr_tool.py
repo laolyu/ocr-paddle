@@ -357,6 +357,8 @@ _DIGIT_CONFUSION_MAP = str.maketrans({
     'G': '6', 'g': '9', 'q': '9',
 })
 _NUMBER_RE = re.compile(r'^[+\-]?(\d{1,3}(,\d{3})*|\d+)(\.\d+)?%?$')
+# 用于列检测：匹配以数字或混淆字符开头的单元格（含「100e（注释）」这类复合格）
+_NUM_START_RE = re.compile(r'^[0-9\u5de5HeIilOoDeSsZzGgqB|]')
 
 # 匹配含至少一个真实数字或「工」的混淆字符串，且不被字母/中文包围
 # 用于在复合文本内定位并修复数字片段（如 「100e（…）」中的 100e）
@@ -405,6 +407,7 @@ def _auto_correct(rows, is_table):
     n_cols = max((len(r) for r in rows), default=0)
 
     # 逐列判断是否为数字列
+    # 计数条件：整格是合法数字 / 可整体纠为合法数字 / 以数字或混淆字符开头（含注释的复合格）
     numeric_col = [False] * n_cols
     for col in range(n_cols):
         total = num = 0
@@ -412,9 +415,10 @@ def _auto_correct(rows, is_table):
             if col >= len(rows[r]) or not rows[r][col].strip():
                 continue
             total += 1
-            if _is_number(rows[r][col]) or (
-                col < len(candidates[r]) and candidates[r][col] is not None
-            ):
+            cell = rows[r][col]
+            if (_is_number(cell)
+                    or (col < len(candidates[r]) and candidates[r][col] is not None)
+                    or bool(_NUM_START_RE.match(cell.strip()))):
                 num += 1
         if total >= 1 and num / total >= 0.7:
             numeric_col[col] = True
@@ -433,7 +437,8 @@ def _auto_correct(rows, is_table):
                     # 复合单元格：局部修复内嵌数字片段
                     new_row.append(_fix_in_text(cell))
             else:
-                new_row.append(cell)
+                # 非数字列也做局部修复（含真实数字的混淆串，如 1eee→1000）
+                new_row.append(_fix_in_text(cell))
         result.append(new_row)
     return result
 
