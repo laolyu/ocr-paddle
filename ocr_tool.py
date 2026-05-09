@@ -349,7 +349,7 @@ _DIGIT_CONFUSION_MAP = str.maketrans({
     # → 1
     'H': '1', 'I': '1', 'i': '1', 'l': '1', '|': '1', '\u5de5': '1',  # 工
     # → 0
-    'O': '0', 'o': '0', 'D': '0', 'e': '0',
+    'O': '0', 'o': '0', 'D': '0', 'e': '0', '\u65e5': '0',  # 日
     # → 其他数字
     'B': '8',
     'S': '5', 's': '5',
@@ -358,15 +358,15 @@ _DIGIT_CONFUSION_MAP = str.maketrans({
 })
 _NUMBER_RE = re.compile(r'^[+\-]?(\d{1,3}(,\d{3})*|\d+)(\.\d+)?%?$')
 # 用于列检测：匹配以数字或混淆字符开头的单元格（含「100e（注释）」这类复合格）
-_NUM_START_RE = re.compile(r'^[0-9\u5de5HeIilOoDeSsZzGgqB|]')
+_NUM_START_RE = re.compile(r'^[0-9\u5de5\u65e5HeIilOoDeSsZzGgqB|]')
 
-# 匹配含至少一个真实数字或「工」的混淆字符串，且不被字母/中文包围
-# 用于在复合文本内定位并修复数字片段（如 「100e（…）」中的 100e）
+# 匹配含至少一个真实数字或「工/日」的混淆字符串，且不被字母/中文包围
+# CJK 边界排除 工(U+5DE5) 和 日(U+65E5)，因为它们是已列入混淆字符的汉字
 _MIXED_NUM_RE = re.compile(
-    '(?<![a-zA-Z\u4e00-\u9fff])'
-    '(?=[0-9HeIilOoDeSsZzGgqB|\u5de5]*[0-9\u5de5])'  # 含真实数字或工
-    '([0-9HeIilOoDeSsZzGgqB|\u5de5]+)'
-    '(?![a-zA-Z\u4e00-\u9fff])'
+    '(?<![a-zA-Z\u4e00-\u5de4\u5de6-\u65e4\u65e6-\u9fff])'
+    '(?=[0-9HeIilOoDeSsZzGgqB|\u5de5\u65e5]*[0-9\u5de5\u65e5])'  # 含真实数字或工/日
+    '([0-9HeIilOoDeSsZzGgqB|\u5de5\u65e5]+)'
+    '(?![a-zA-Z\u4e00-\u5de4\u5de6-\u65e4\u65e6-\u9fff])'
 )
 
 def _is_number(text):
