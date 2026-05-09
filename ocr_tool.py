@@ -4,6 +4,7 @@ OCR 截图识别工具
 - 智能模式：自动判断纯文本 / 表格，表格输出 TSV（粘贴到 Excel 自动分列）
 """
 import ctypes
+import re
 import sys
 import threading
 import warnings
@@ -343,6 +344,100 @@ def _format_tsv(rows):
     return '\n'.join('\t'.join(cells) for cells in rows)
 
 
+# ───────────────────────── OCR 数字混淆自动纠错 ─────────────────────────
+_DIGIT_CONFUSION_MAP = str.maketrans({
+    # → 1
+    'H': '1', 'I': '1', 'i': '1', 'l': '1', '|': '1', '\u5de5': '1',  # 工
+    # → 0
+    'O': '0', 'o': '0', 'D': '0', 'e': '0',
+    # → 其他数字
+    'B': '8',
+    'S': '5', 's': '5',
+    'Z': '2', 'z': '2',
+    'G': '6', 'g': '9', 'q': '9',
+})
+_NUMBER_RE = re.compile(r'^[+\-]?(\d{1,3}(,\d{3})*|\d+)(\.\d+)?%?$')
+
+# 匹配含至少一个真实数字或「工」的混淆字符串，且不被字母/中文包围
+# 用于在复合文本内定位并修复数字片段（如 「100e（…）」中的 100e）
+_MIXED_NUM_RE = re.compile(
+    '(?<![a-zA-Z\u4e00-\u9fff])'
+    '(?=[0-9HeIilOoDeSsZzGgqB|\u5de5]*[0-9\u5de5])'  # 含真实数字或工
+    '([0-9HeIilOoDeSsZzGgqB|\u5de5]+)'
+    '(?![a-zA-Z\u4e00-\u9fff])'
+)
+
+def _is_number(text):
+    return bool(_NUMBER_RE.match(text.strip()))
+
+def _try_fix_number(text):
+    """整个字符串替换混淆字符后若为合法数字则返回纠正值，否则 None。"""
+    candidate = text.strip().translate(_DIGIT_CONFUSION_MAP)
+    return candidate if _is_number(candidate) else None
+
+def _fix_in_text(text):
+    """在混合文本中查找含真实数字/工的混淆串并纠正（保留其余文字不变）。"""
+    def _fix_run(m):
+        token = m.group(1)
+        fixed = _try_fix_number(token)
+        if fixed is not None and fixed != token:
+            log.info(f'自动纠错: {repr(token)} \u2192 {repr(fixed)}')
+            return fixed
+        return token
+    return _MIXED_NUM_RE.sub(_fix_run, text)
+
+def _auto_correct(rows, is_table):
+    """
+    纠错策略：
+    • 表格模式 —— 逐列检测「数字列」（≥70% 单元格是/可纠为合法数字）：
+        - 纯数字单元格：整体替换（含无真实数字的混淆串，如 He→10）
+        - 复合单元格：  定位内嵌数字片段后局部替换（如 100e(…)→1000(…)）
+    • 文本模式 —— 对每个单元格做局部替换（要求含真实数字/工，防止误改英文）
+    """
+    if not rows:
+        return rows
+
+    if not is_table:
+        return [[_fix_in_text(cell) for cell in row] for row in rows]
+
+    # 预计算每格的整体纠错候选
+    candidates = [[_try_fix_number(cell) for cell in row] for row in rows]
+    n_cols = max((len(r) for r in rows), default=0)
+
+    # 逐列判断是否为数字列
+    numeric_col = [False] * n_cols
+    for col in range(n_cols):
+        total = num = 0
+        for r in range(len(rows)):
+            if col >= len(rows[r]) or not rows[r][col].strip():
+                continue
+            total += 1
+            if _is_number(rows[r][col]) or (
+                col < len(candidates[r]) and candidates[r][col] is not None
+            ):
+                num += 1
+        if total >= 1 and num / total >= 0.7:
+            numeric_col[col] = True
+
+    result = []
+    for r, row in enumerate(rows):
+        new_row = []
+        for col, cell in enumerate(row):
+            if col < n_cols and numeric_col[col]:
+                cand = candidates[r][col] if col < len(candidates[r]) else None
+                if cand is not None and cand != cell.strip():
+                    # 整体可纠（含 He→10 这类无真实数字的混淆串）
+                    log.info(f'自动纠错: {repr(cell)} \u2192 {repr(cand)}')
+                    new_row.append(cand)
+                else:
+                    # 复合单元格：局部修复内嵌数字片段
+                    new_row.append(_fix_in_text(cell))
+            else:
+                new_row.append(cell)
+        result.append(new_row)
+    return result
+
+
 # ───────────────────────── 主流程 ─────────────────────────
 _run_count = 0  # 记录调用次数，便于日志追踪
 
@@ -447,6 +542,7 @@ def run_ocr():
         return
 
     rows, is_table = _build_table(cells)
+    rows = _auto_correct(rows, is_table)
     output = _format_tsv(rows)
     pyperclip.copy(output)
 
