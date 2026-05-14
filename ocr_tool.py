@@ -17,7 +17,7 @@ matplotlib.use('Agg')
 
 # 2. 配置日志与警告
 logging.basicConfig(
-    level=logging.DEBUG,  # DEBUG 级别以便捕获所有信息
+    level=logging.ERROR,  # DEBUG 级别以便捕获所有信息
     format='%(asctime)s.%(msecs)03d [%(levelname)s][%(threadName)s] %(message)s',
     datefmt='%H:%M:%S'
 )
@@ -51,7 +51,7 @@ ocr = PaddleOCR(
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
     use_textline_orientation=False,
-    device="cpu", # 如果你有N卡并装了GPU版PyTorch，可以改为 "gpu"
+    device="gpu", # 如果你有N卡并装了GPU版PyTorch，可以改为 "gpu"
     engine="transformers",
 )
 print(f"✓ 就绪！按 {HOTKEY.upper()} 框选识别  |  Esc 取消  |  Ctrl+C 退出\n")
